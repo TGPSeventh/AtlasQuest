@@ -12,7 +12,11 @@ import com.seventh.atlasquest.domain.model.QuestStatus
 import com.seventh.atlasquest.domain.model.StatAxis
 import com.seventh.atlasquest.domain.model.SubTask
 import com.seventh.atlasquest.domain.progression.ProgressionEngine
+import com.seventh.atlasquest.domain.progression.SystemReward
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.firstOrNull
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -25,6 +29,9 @@ class AtlasQuestRepository(private val database: AtlasQuestDatabase) {
 
     val playerProfile: Flow<PlayerProfileEntity?> = profileDao.getPlayerProfile()
     val allQuests: Flow<List<QuestEntity>> = questDao.getAllQuests()
+
+    private val _systemRewardEvents = MutableSharedFlow<SystemReward>()
+    val systemRewardEvents: SharedFlow<SystemReward> = _systemRewardEvents.asSharedFlow()
 
     suspend fun initialize() {
         StarterQuestSeeder.seedIfNeeded(database)
@@ -142,29 +149,63 @@ class AtlasQuestRepository(private val database: AtlasQuestDatabase) {
 
     suspend fun completeQuest(questId: Long, isFallback: Boolean) {
         val quest = questDao.getQuestById(questId) ?: return
-        val profile = profileDao.getPlayerProfileSync() ?: PlayerProfileEntity(id = 1)
+        var profile = profileDao.getPlayerProfileSync() ?: PlayerProfileEntity(id = 1)
 
         val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-        val calendar = java.util.Calendar.getInstance()
-        calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
-        calendar.set(java.util.Calendar.MINUTE, 0)
-        calendar.set(java.util.Calendar.SECOND, 0)
-        calendar.set(java.util.Calendar.MILLISECOND, 0)
-        val startOfDay = calendar.timeInMillis
 
-        val todayLogs = questLogDao.getLogsSince(startOfDay)
-        val rewards = ProgressionEngine.calculateRewards(quest.effortTier, isFallback, todayLogs.size)
+        // Reset daily counters if day changed
+        if (profile.lastResetDate != todayStr) {
+            profile = profile.copy(
+                dailyMainCount = 0,
+                dailySideCount = 0,
+                lastResetDate = todayStr
+            )
+        }
+
+        val isCapped = ProgressionEngine.isQuestCapped(quest.kind, profile)
+        val rewards = ProgressionEngine.calculateRewards(quest.effortTier, isFallback, isCapped)
 
         val newTotalXp = profile.totalXp + rewards.xpGained
         val newUnspentPoints = profile.unspentStatPoints + rewards.statPointsGained
 
+        val newDailyMain = if (quest.kind == QuestKind.MAIN_QUEST) profile.dailyMainCount + 1 else profile.dailyMainCount
+        val newDailySide = if (quest.kind == QuestKind.SIDE_QUEST) profile.dailySideCount + 1 else profile.dailySideCount
+        val newWeeklyMain = if (quest.kind == QuestKind.MAIN_QUEST) profile.weeklyMainCount + 1 else profile.weeklyMainCount
+        val newWeeklySide = if (quest.kind == QuestKind.SIDE_QUEST) profile.weeklySideCount + 1 else profile.weeklySideCount
+
+        // Roll for random system reward loot drop
+        val systemReward = ProgressionEngine.rollSystemReward()
+        val bonusMainD = profile.bonusDailyMainCap + (systemReward?.bonusMainDaily ?: 0)
+        val bonusSideD = profile.bonusDailySideCap + (systemReward?.bonusSideDaily ?: 0)
+        val bonusMainW = profile.bonusWeeklyMainCap + (systemReward?.bonusMainWeekly ?: 0)
+        val bonusSideW = profile.bonusWeeklySideCap + (systemReward?.bonusSideWeekly ?: 0)
+
+        if (systemReward != null) {
+            _systemRewardEvents.emit(systemReward)
+        }
+
+        val baseProfileUpdate = profile.copy(
+            totalXp = newTotalXp,
+            unspentStatPoints = newUnspentPoints,
+            dailyMainCount = newDailyMain,
+            dailySideCount = newDailySide,
+            weeklyMainCount = newWeeklyMain,
+            weeklySideCount = newWeeklySide,
+            bonusDailyMainCap = bonusMainD,
+            bonusDailySideCap = bonusSideD,
+            bonusWeeklyMainCap = bonusMainW,
+            bonusWeeklySideCap = bonusSideW,
+            lastActiveDate = todayStr,
+            lastResetDate = todayStr
+        )
+
         val updatedProfile = when (quest.statAxis) {
-            StatAxis.STR -> profile.copy(statStr = profile.statStr + rewards.statPointsGained, totalXp = newTotalXp, unspentStatPoints = newUnspentPoints, lastActiveDate = todayStr)
-            StatAxis.VIT -> profile.copy(statVit = profile.statVit + rewards.statPointsGained, totalXp = newTotalXp, unspentStatPoints = newUnspentPoints, lastActiveDate = todayStr)
-            StatAxis.INT -> profile.copy(statInt = profile.statInt + rewards.statPointsGained, totalXp = newTotalXp, unspentStatPoints = newUnspentPoints, lastActiveDate = todayStr)
-            StatAxis.FOC -> profile.copy(statFoc = profile.statFoc + rewards.statPointsGained, totalXp = newTotalXp, unspentStatPoints = newUnspentPoints, lastActiveDate = todayStr)
-            StatAxis.DIS -> profile.copy(statDis = profile.statDis + rewards.statPointsGained, totalXp = newTotalXp, unspentStatPoints = newUnspentPoints, lastActiveDate = todayStr)
-            StatAxis.EXP -> profile.copy(statExp = profile.statExp + rewards.statPointsGained, totalXp = newTotalXp, unspentStatPoints = newUnspentPoints, lastActiveDate = todayStr)
+            StatAxis.STR -> baseProfileUpdate.copy(statStr = baseProfileUpdate.statStr + rewards.statPointsGained)
+            StatAxis.VIT -> baseProfileUpdate.copy(statVit = baseProfileUpdate.statVit + rewards.statPointsGained)
+            StatAxis.INT -> baseProfileUpdate.copy(statInt = baseProfileUpdate.statInt + rewards.statPointsGained)
+            StatAxis.FOC -> baseProfileUpdate.copy(statFoc = baseProfileUpdate.statFoc + rewards.statPointsGained)
+            StatAxis.DIS -> baseProfileUpdate.copy(statDis = baseProfileUpdate.statDis + rewards.statPointsGained)
+            StatAxis.EXP -> baseProfileUpdate.copy(statExp = baseProfileUpdate.statExp + rewards.statPointsGained)
         }
 
         profileDao.insertOrUpdateProfile(updatedProfile)

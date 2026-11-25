@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import com.seventh.atlasquest.data.local.QuestEntity
 import com.seventh.atlasquest.domain.model.QuestFormat
 import com.seventh.atlasquest.domain.model.QuestStatus
+import com.seventh.atlasquest.domain.progression.ProgressionEngine
 import com.seventh.atlasquest.ui.AtlasQuestUiState
 
 @Composable
@@ -25,6 +26,10 @@ fun QuestBoardScreen(
     onToggleSubTask: (Long, String, Boolean) -> Unit
 ) {
     val activeQuests = uiState.quests.filter { it.status == QuestStatus.ACTIVE }
+    val profile = uiState.profile
+
+    val mainDailyCap = ProgressionEngine.BASE_DAILY_MAIN_CAP + profile.bonusDailyMainCap
+    val sideDailyCap = ProgressionEngine.BASE_DAILY_SIDE_CAP + profile.bonusDailySideCap
 
     Column(
         modifier = Modifier
@@ -42,6 +47,31 @@ fun QuestBoardScreen(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Daily Usage & Capacity Tracker Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text(
+                    text = "Daily Quest Capacity & Usage",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    TrackerPill(label = "Main Quests", used = profile.dailyMainCount, cap = mainDailyCap)
+                    TrackerPill(label = "Side Quests", used = profile.dailySideCount, cap = sideDailyCap)
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -73,6 +103,24 @@ fun QuestBoardScreen(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun TrackerPill(label: String, used: Int, cap: Int) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.padding(4.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(text = label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(text = "$used / $cap used", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
         }
     }
 }

@@ -15,6 +15,8 @@ import com.seventh.atlasquest.domain.model.StatAxis
 import com.seventh.atlasquest.domain.model.SubTask
 import com.seventh.atlasquest.domain.progression.LevelProgress
 import com.seventh.atlasquest.domain.progression.ProgressionEngine
+import com.seventh.atlasquest.domain.progression.SystemReward
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -40,6 +42,8 @@ class AtlasQuestViewModel(application: Application) : AndroidViewModel(applicati
             repository.initialize()
         }
     }
+
+    val systemRewardEvents: SharedFlow<SystemReward> = repository.systemRewardEvents
 
     val uiState: StateFlow<AtlasQuestUiState> = combine(
         repository.playerProfile,

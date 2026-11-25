@@ -1,7 +1,10 @@
 package com.seventh.atlasquest.domain.progression
 
+import com.seventh.atlasquest.data.local.PlayerProfileEntity
 import com.seventh.atlasquest.domain.model.EffortTier
+import com.seventh.atlasquest.domain.model.QuestKind
 import com.seventh.atlasquest.domain.model.StatAxis
+import kotlin.random.Random
 
 data class LevelProgress(
     val level: Int,
@@ -10,14 +13,24 @@ data class LevelProgress(
     val progressPercent: Float
 )
 
+data class SystemReward(
+    val title: String,
+    val description: String,
+    val bonusMainDaily: Int = 0,
+    val bonusSideDaily: Int = 0,
+    val bonusMainWeekly: Int = 0,
+    val bonusSideWeekly: Int = 0
+)
+
 object ProgressionEngine {
-    private const val DAILY_FULL_REWARD_CAP = 12
+    // Base Caps
+    const val BASE_DAILY_MAIN_CAP = 5
+    const val BASE_DAILY_SIDE_CAP = 7
+    const val BASE_WEEKLY_MAIN_CAP = 35
+    const val BASE_WEEKLY_SIDE_CAP = 45
     private const val FALLBACK_XP = 10
 
     fun calculateLevel(totalXp: Int): LevelProgress {
-        // Simple RPG curve: Level N requires N * 100 XP (or cumulative)
-        // Let's use cumulative XP per level: Level 1 -> 100, Level 2 -> 250, Level 3 -> 450, etc.
-        // Formula: Level L requires 100 * L baseline per level up.
         var level = 1
         var xpRemaining = totalXp
         var xpForNext = 100
@@ -37,15 +50,28 @@ object ProgressionEngine {
         )
     }
 
+    fun isQuestCapped(kind: QuestKind, profile: PlayerProfileEntity): Boolean {
+        return when (kind) {
+            QuestKind.MAIN_QUEST -> {
+                val effectiveDailyCap = BASE_DAILY_MAIN_CAP + profile.bonusDailyMainCap
+                val effectiveWeeklyCap = BASE_WEEKLY_MAIN_CAP + profile.bonusWeeklyMainCap
+                profile.dailyMainCount >= effectiveDailyCap || profile.weeklyMainCount >= effectiveWeeklyCap
+            }
+            QuestKind.SIDE_QUEST -> {
+                val effectiveDailyCap = BASE_DAILY_SIDE_CAP + profile.bonusDailySideCap
+                val effectiveWeeklyCap = BASE_WEEKLY_SIDE_CAP + profile.bonusWeeklySideCap
+                profile.dailySideCount >= effectiveDailyCap || profile.weeklySideCount >= effectiveWeeklyCap
+            }
+        }
+    }
+
     fun calculateRewards(
         effortTier: EffortTier,
         isFallback: Boolean,
-        todayCompletionCount: Int
+        isCapped: Boolean
     ): RewardResult {
-        val isCapped = todayCompletionCount >= DAILY_FULL_REWARD_CAP
-
         val xp = if (isFallback) {
-            FALLVAL_XP_CHECK(FALLBACK_XP, isCapped)
+            if (isCapped) maxOf(5, (FALLBACK_XP * 0.6f).toInt()) else FALLBACK_XP
         } else {
             if (isCapped) (effortTier.baseXp * 0.5f).toInt() else effortTier.baseXp
         }
@@ -63,8 +89,37 @@ object ProgressionEngine {
         )
     }
 
-    private fun FALLVAL_XP_CHECK(base: Int, capped: Boolean): Int {
-        return if (capped) maxOf(5, (base * 0.6f).toInt()) else base
+    fun rollSystemReward(): SystemReward? {
+        // 35% chance on completion to trigger a random system reward loot drop
+        val roll = Random.nextFloat()
+        if (roll > 0.35f) return null
+
+        return when (Random.nextInt(4)) {
+            0 -> SystemReward(
+                title = "🎁 System Loot Drop: Main Quest Surge",
+                description = "Granted +1 Daily Main Quest capacity and +2 Weekly Main Quest capacity!",
+                bonusMainDaily = 1,
+                bonusMainWeekly = 2
+            )
+            1 -> SystemReward(
+                title = "🎁 System Loot Drop: Side Quest Anomaly",
+                description = "Granted +2 Daily Side Quest capacity and +3 Weekly Side Quest capacity!",
+                bonusSideDaily = 2,
+                bonusSideWeekly = 3
+            )
+            2 -> SystemReward(
+                title = "🎁 System Loot Drop: Chrono Expansion",
+                description = "Granted +1 Daily Main Capacity and +1 Daily Side Capacity!",
+                bonusMainDaily = 1,
+                bonusSideDaily = 1
+            )
+            else -> SystemReward(
+                title = "🎁 System Loot Drop: Atlas Resonance",
+                description = "Granted +2 Weekly Main Capacity and +2 Weekly Side Capacity!",
+                bonusMainWeekly = 2,
+                bonusSideWeekly = 2
+            )
+        }
     }
 
     fun resolveArchetype(stats: Map<StatAxis, Int>): String {
@@ -72,7 +127,6 @@ object ProgressionEngine {
             return "Wandering Novice"
         }
 
-        // Find top 2 stats
         val sorted = stats.entries.sortedByDescending { it.value }
         val top1 = sorted.getOrNull(0)
         val top2 = sorted.getOrNull(1)

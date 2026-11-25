@@ -21,6 +21,15 @@ data class PlayerProfileEntity(
     val statDis: Int = 0,
     val statExp: Int = 0,
     val streakDays: Int = 0,
+    val dailyMainCount: Int = 0,
+    val dailySideCount: Int = 0,
+    val weeklyMainCount: Int = 0,
+    val weeklySideCount: Int = 0,
+    val bonusDailyMainCap: Int = 0,
+    val bonusDailySideCap: Int = 0,
+    val bonusWeeklyMainCap: Int = 0,
+    val bonusWeeklySideCap: Int = 0,
+    val lastResetDate: String? = null,
     val lastActiveDate: String? = null
 )
 
